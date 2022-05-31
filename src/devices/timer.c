@@ -7,7 +7,8 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-  
+
+#include "threads/malloc.h"
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -85,15 +86,29 @@ timer_elapsed (int64_t then)
 }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
-   be turned on. */
+   be turned on so that context switch is possible. */
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
-
+  int64_t start = timer_ticks (); //start time of func call
+  
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  //while (timer_elapsed (start) < ticks) 
+  //  thread_yield (); //set thread to ready
+  //put thread to sleep and wake up if enough time has passed
+  //who knows the time?
+  //create a list of locks and their time
+  //use interrupt and ask if any time has passed
+  //
+  //initialize sema to 0 and then put sema on list associated with time then down sema
+  struct thread *t = thread_current ();
+  struct semaphore* s = malloc(sizeof(struct semaphore));
+  t->thread_sema = s;
+  sema_init (t->thread_sema, 0);
+  t->my_time = start + ticks;
+  sema_down (t->thread_sema);
+  free(s);
+  t->thread_sema = NULL;
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be

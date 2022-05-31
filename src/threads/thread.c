@@ -9,8 +9,10 @@
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
-#include "threads/synch.h"
+
 #include "threads/vaddr.h"
+
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -71,6 +73,12 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+//added functions
+static struct thread *get_high_prio_thread (void);
+bool prio_thread_list_less(const struct list_elem *a, const struct list_elem *b, void*aux UNUSED);
+void checkThreadTime (struct thread *thread, void *aux UNUSED);
+int max (const int a, const int b);
+int get_effective_prio(struct thread * t);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -123,7 +131,7 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-
+  thread_foreach (checkThreadTime, NULL); //cannot call yield in interrupt context
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -133,7 +141,7 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
+  
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -199,8 +207,14 @@ thread_create (const char *name, int priority,
   sf->ebp = 0;
 
   /* Add to run queue. */
+  //do I need to group these? if unblock and schedule out then will yield to high thread anyway
   thread_unblock (t);
-
+  //printf("Finish unblock\n");
+  if (thread_current ()->priority < priority)
+    thread_yield ();
+  //printf("Curr Thread: %s\n", thread_name ());
+  //printf("Unblocking thread = %s\n", t->name);
+  //printf("Ready List size = %d\n", list_size(&ready_list));
   return tid;
 }
 
@@ -285,7 +299,6 @@ thread_exit (void)
 #ifdef USERPROG
   process_exit ();
 #endif
-
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
@@ -305,9 +318,9 @@ thread_yield (void)
   enum intr_level old_level;
   
   ASSERT (!intr_context ());
-
+  
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (cur != idle_thread)
     list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
@@ -336,14 +349,53 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  //if we have donate and 
+  if (!list_empty(&ready_list) && new_priority < get_high_prio_thread ()->priority)
+    thread_yield ();
+  //look for threads with higher priority and yield
 }
 
+void
+thread_add_donated_priority (struct thread *t, int new_priority) 
+{
+  ASSERT (is_thread (t));
+  //printf("Adding prio\n");
+  t->effective_prio += new_priority;
+  //look for threads with higher priority and yield
+}
+int
+max (const int a, const int b)
+{
+  if (a < b)
+    return b;
+  else
+    return a;
+}
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return get_effective_prio(thread_current ());
 }
+
+int
+get_effective_prio(struct thread * t)
+{
+  return max(t->priority, t->effective_prio);
+}
+
+/* Returns the highest prio thread. */
+struct thread *
+get_high_prio_thread (void)
+{
+  if (!list_empty(&ready_list))
+  {
+    struct list_elem *h_thread = list_max (&ready_list, prio_thread_list_less, NULL);
+    return list_entry (h_thread, struct thread, elem);
+  }
+  else
+    return NULL;
+} 
 
 /* Sets the current thread's nice value to NICE. */
 void
@@ -390,14 +442,14 @@ idle (void *idle_started_ UNUSED)
 {
   struct semaphore *idle_started = idle_started_;
   idle_thread = thread_current ();
-  sema_up (idle_started);
-
-  for (;;) 
+  sema_up (idle_started); //wakes up starting thread and continues running
+  
+  for (;;) //inf loop
     {
       /* Let someone else run. */
       intr_disable ();
       thread_block ();
-
+        
       /* Re-enable interrupts and wait for the next one.
 
          The `sti' instruction disables interrupts until the
@@ -464,6 +516,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  t->thread_sema = NULL;
+  t->waiting_lock = NULL;
+  t->my_time = 0;
+  t->effective_prio = priority;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -491,9 +548,13 @@ static struct thread *
 next_thread_to_run (void) 
 {
   if (list_empty (&ready_list))
-    return idle_thread;
+    return idle_thread; 
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  {
+    struct list_elem *max = list_max (&ready_list, prio_thread_list_less, NULL);
+    list_remove(max);
+    return list_entry (max, struct thread, elem); //next thread at end of list removed
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -542,6 +603,19 @@ thread_schedule_tail (struct thread *prev)
     }
 }
 
+void 
+checkThreadTime (struct thread *thread, void *aux UNUSED)
+{
+  if (thread->thread_sema != NULL && thread->my_time != 0)
+  {
+    if (timer_ticks () >= thread->my_time)
+    {
+      sema_up (thread->thread_sema);
+      thread->my_time = 0;
+    }
+  }
+}
+
 /* Schedules a new process.  At entry, interrupts must be off and
    the running process's state must have been changed from
    running to some other state.  This function finds another
@@ -578,6 +652,38 @@ allocate_tid (void)
 
   return tid;
 }
+
+bool 
+prio_thread_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  //retrieve thread from list elem and check prio
+  struct thread *t1 = list_entry (a, struct thread, elem);
+  struct thread *t2 = list_entry (b, struct thread, elem);
+  //int effective_prio1 = t1->priority + t1->donated_priority;
+  //int effective_prio2 = t2->priority + t2->donated_priority;
+  if (get_effective_prio (t1) < get_effective_prio(t2))
+    return true;
+  return false;
+}
+/*
+int 
+thread_prio_compare(const void * t1, const void * t1)
+{
+  struct thread *thread_1 = (struct thread)t1;
+  struct thread *thread_2 = (struct thread)t2;
+
+  if (thread_1->priority < thread_2->priority)
+  {
+    return -1;
+  } else if (thread_1->priority > thread_2->priority)
+  {
+    return 1;
+  } else
+  {
+    return 0;
+  }
+}*/
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
