@@ -188,7 +188,7 @@ lock_init (struct lock *lock)
 
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
-  lock->donated = false;
+  //lock->waited_by = NULL;
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -206,23 +206,57 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
   
-  int cnt = 0;
-  struct thread *l_hold = lock->holder;
-  while (l_hold != NULL && lock->holder->priority < thread_get_priority () && cnt < 8)
+  struct thread *l_hold_thread = lock->holder;
+  //printf("Thread holding lock prio = %d\n", l_hold_thread->priority);
+  //printf("Thread prio = %d\n", thread_get_priority ());
+  if (l_hold_thread != NULL && l_hold_thread->priority < thread_get_priority ())
+  {
+    //printf("Acquiring already aquired lock and I have higher prio\n");
+    thread_current ()->waiting_on_thread = l_hold_thread;
+    //printf("Thread holding lock = %s\n", l_hold_thread->name);
+    thread_set_donated_priority (l_hold_thread, thread_current ());
+    //lock->waited_by = thread_current ();
+    //thread_current ()->waiting_lock = lock;
+    /*while (l_hold_thread->priority < thread_get_priority () && cnt < 8)
     {
-      int prio_needed = thread_get_priority () - l_hold->priority;
-      //printf("Prio needed = %d\n", prio_needed);
-      thread_add_donated_priority (l_hold, prio_needed);
-      lock->donated = true;
-      if (cnt == 0)
-        thread_current ()->waiting_lock = lock;
+      thread_set_donated_priority (l_hold_thread, curr_thread);
+      printf("Iterating; cnt = %d\n", cnt);
       cnt++;
-      if (l_hold->waiting_lock != NULL)
-        l_hold = l_hold->waiting_lock->holder; //thread ptr to lock *
+      if (l_hold_thread->waiting_on_thread != NULL)
+      {
+        printf("Thread holding lock is waiting\n");
+        curr_thread = l_hold_thread;
+        l_hold_thread = l_hold_thread->waiting_on_thread;
+      }
       else 
-        l_hold = NULL;
-    }
+        break;
+    }*/
+  }  
+  /*while (l_hold_thread != NULL && l_hold_thread->priority < thread_get_priority () && cnt < 8)
+    {
+      printf("Current thread = %s\n", thread_name ());
+      printf("L_hold_thread = %s\n", l_hold_thread->name);
+      printf("L_hold_thread prio = %d\n", l_hold_thread->priority);
+      if (cnt == 0)
+        thread_current ()->waiting_on_thread = l_hold_thread;
+      printf("Iterating; cnt = %d\n", cnt);
+      thread_set_donated_priority (l_hold_thread, curr_thread->waiting_lock, thread_get_priority ());
+      cnt++;
+      if (l_hold_thread->waiting_on_thread != NULL)
+      {
+        curr_thread = l_hold_thread;
+        l_hold_thread = l_hold_thread->waiting_lock->holder;
+        printf("L_hold_thread waiting lock not null\n");
+        //next thread is waiting on someone
+      } else 
+        l_hold_thread = NULL;
+    }*/
   sema_down (&lock->semaphore);
+  //if (strcmp(thread_name (), "medium") == 0)
+  //  printf("Med has acquired lock\n");
+  thread_current ()->waiting_on_thread = NULL;
+  //thread_current ()->waiting_lock = NULL;
+  //lock->waited_by = NULL;
   lock->holder = thread_current ();
 }
 
@@ -252,14 +286,35 @@ lock_try_acquire (struct lock *lock)
    make sense to try to release a lock within an interrupt
    handler. */
 void
-lock_release (struct lock *lock) //change priority back if correct lock
+lock_release (struct lock *lock) //change priority back if lock owned thread
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
   //if lock holder donated prio > 0
   //printf("Releasing from %s\n", thread_name ());
-  if (lock->donated)
-    thread_current ()->effective_prio = thread_current ()->priority;
+  struct list *dt_list = &thread_current ()->donate_thread_list;
+  struct list *waiting_list = &(lock->semaphore.waiters);
+  if (!list_empty(dt_list) && !list_empty(waiting_list)) //need to know that this is the correct lock
+    {
+      //printf("Thread name = %s\n", thread_name ());
+      struct list_elem *dt_e;
+      struct list_elem *waiting_e;
+      struct thread *dt = NULL;
+      struct thread *wt = NULL;
+      for (dt_e = list_begin (dt_list); dt_e != list_end (dt_list); dt_e = list_next (dt_e))
+        {
+          dt = list_entry (dt_e, struct thread, donate_elem);
+          for (waiting_e = list_begin (waiting_list); waiting_e != list_end (waiting_list); waiting_e = list_next (waiting_e))
+            {
+              wt = list_entry (waiting_e, struct thread, elem);
+              //printf("Donated thread name = %s\n", dt->name);
+              if (dt == wt)
+                list_remove(dt_e);
+            }
+        }
+      //printf("List size = %d\n", list_size (dt_list));
+      //thread_add_donated_priority (thread_current (), lock->donated * -1);
+    }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
@@ -337,6 +392,18 @@ cond_wait (struct condition *cond, struct lock *lock)
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to signal a condition variable within an
    interrupt handler. */
+
+bool 
+sema_prio_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  //retrieve thread from list elem and check prio
+  struct semaphore *sema1 = list_entry (a, struct semaphore, waiter);
+  struct semaphore *sema2 = list_entry (b, struct semaphore, waiter);
+  if ( < get_effective_prio (dt2))
+    return true;
+  return false;
+}
+
 void
 cond_signal (struct condition *cond, struct lock *lock UNUSED) 
 {
@@ -344,10 +411,17 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
-
+  struct semaphore *h_sema = NULL;
   if (!list_empty (&cond->waiters)) 
-    sema_up (&list_entry (list_pop_front (&cond->waiters),
+  {
+      //wake up highest prio thread
+    struct list_elem *max = list_max(&cond->waiters, prio_thread_list_less, NULL);
+    list_remove(max);
+    h_sema = list_entry (max, struct semaphore, elem);
+    sema_up (&list_entry (h_sema,
                           struct semaphore_elem, elem)->semaphore);
+  }
+    
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by

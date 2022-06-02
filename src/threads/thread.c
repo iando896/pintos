@@ -11,7 +11,7 @@
 #include "threads/switch.h"
 
 #include "threads/vaddr.h"
-
+#include "threads/malloc.h"
 #include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -76,8 +76,9 @@ static tid_t allocate_tid (void);
 //added functions
 static struct thread *get_high_prio_thread (void);
 bool prio_thread_list_less(const struct list_elem *a, const struct list_elem *b, void*aux UNUSED);
+bool effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 void checkThreadTime (struct thread *thread, void *aux UNUSED);
-int max (const int a, const int b);
+//int max (const int a, const int b);
 int get_effective_prio(struct thread * t);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -356,21 +357,23 @@ thread_set_priority (int new_priority)
 }
 
 void
-thread_add_donated_priority (struct thread *t, int new_priority) 
+thread_set_donated_priority (struct thread *set_t, struct thread *donate_t)
 {
-  ASSERT (is_thread (t));
+  ASSERT (is_thread (set_t));
+  //
   //printf("Adding prio\n");
-  t->effective_prio += new_priority;
-  //look for threads with higher priority and yield
+  //struct donate_thread *dt= malloc(sizeof(struct donate_thread));
+  //donate_thread_init(dt, donate_t, new_priority);
+  list_push_back(&set_t->donate_thread_list, &donate_t->donate_elem);
 }
-int
+/*int
 max (const int a, const int b)
 {
   if (a < b)
     return b;
   else
     return a;
-}
+}*/
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
@@ -381,7 +384,17 @@ thread_get_priority (void)
 int
 get_effective_prio(struct thread * t)
 {
-  return max(t->priority, t->effective_prio);
+  ASSERT (is_thread (t));
+  if (!list_empty(&t->donate_thread_list)) //if there has been a donation then we need to check effective
+    {
+      struct list_elem *high_dt = list_max (&t->donate_thread_list, effective_prio_list_less, NULL);
+      //struct donate_thread *dt= list_entry (high_dt, struct donate_thread, elem);
+      struct thread *dt = list_entry (high_dt, struct thread, donate_elem);
+      int ret = get_effective_prio(dt);
+      if (ret > t->priority) //greater than previous prio
+        return ret;
+    }
+  return t->priority;
 }
 
 /* Returns the highest prio thread. */
@@ -517,9 +530,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
   t->thread_sema = NULL;
-  t->waiting_lock = NULL;
+  t->waiting_on_thread = NULL;
+  //t->waiting_lock;
   t->my_time = 0;
-  t->effective_prio = priority;
+
+  list_init(&t->donate_thread_list);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -659,12 +674,31 @@ prio_thread_list_less (const struct list_elem *a, const struct list_elem *b, voi
   //retrieve thread from list elem and check prio
   struct thread *t1 = list_entry (a, struct thread, elem);
   struct thread *t2 = list_entry (b, struct thread, elem);
-  //int effective_prio1 = t1->priority + t1->donated_priority;
-  //int effective_prio2 = t2->priority + t2->donated_priority;
-  if (get_effective_prio (t1) < get_effective_prio(t2))
+
+  if (get_effective_prio (t1) < get_effective_prio (t2))
     return true;
   return false;
 }
+
+bool 
+effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  //retrieve thread from list elem and check prio
+  struct thread *dt1 = list_entry (a, struct thread, donate_elem);
+  struct thread *dt2= list_entry (b, struct thread, donate_elem);
+  if (get_effective_prio (dt1) < get_effective_prio (dt2))
+    return true;
+  return false;
+}
+
+/* Initializes the donate lock struct and adds it to the 
+   threads list*/
+/*void 
+donate_thread_init (struct donate_thread *dt, struct thread *t, int n)
+{
+  dt->t = t;
+  dt->effective_prio = n;
+}*/
 /*
 int 
 thread_prio_compare(const void * t1, const void * t1)

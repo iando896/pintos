@@ -89,12 +89,14 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int effective_prio;  //pointing to same
     struct list_elem allelem;           /* List element for all threads list. */
     struct semaphore *thread_sema;      /* Semaphore that sleeps the thread */
-    struct lock *waiting_lock;
+    struct thread *waiting_on_thread;
+    //struct lock *waiting_lock;
     int64_t my_time;
     
+    struct list donate_thread_list;
+    struct list_elem donate_elem;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -106,6 +108,14 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+/*
+struct donate_thread 
+  {
+    struct thread *t;
+    int effective_prio;
+    struct list_elem elem;
+  };*/
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -137,7 +147,7 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
-void thread_add_donated_priority (struct thread *t, int new_priority);
+void thread_set_donated_priority (struct thread *set_t, struct thread *donate_t);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
@@ -146,5 +156,7 @@ int thread_get_load_avg (void);
 
 //added functions
 bool prio_thread_list_less(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+int get_effective_prio(struct thread * t);
+//void donate_thread_init (struct donate_thread *dt, struct thread *t, int n);
 
 #endif /* threads/thread.h */
