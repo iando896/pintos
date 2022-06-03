@@ -212,7 +212,7 @@ lock_acquire (struct lock *lock)
   if (l_hold_thread != NULL && l_hold_thread->priority < thread_get_priority ())
   {
     //printf("Acquiring already aquired lock and I have higher prio\n");
-    thread_current ()->waiting_on_thread = l_hold_thread;
+    //thread_current ()->waiting_on_thread = l_hold_thread;
     //printf("Thread holding lock = %s\n", l_hold_thread->name);
     thread_set_donated_priority (l_hold_thread, thread_current ());
     //lock->waited_by = thread_current ();
@@ -252,11 +252,6 @@ lock_acquire (struct lock *lock)
         l_hold_thread = NULL;
     }*/
   sema_down (&lock->semaphore);
-  //if (strcmp(thread_name (), "medium") == 0)
-  //  printf("Med has acquired lock\n");
-  thread_current ()->waiting_on_thread = NULL;
-  //thread_current ()->waiting_lock = NULL;
-  //lock->waited_by = NULL;
   lock->holder = thread_current ();
 }
 

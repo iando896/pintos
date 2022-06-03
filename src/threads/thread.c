@@ -9,10 +9,10 @@
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
-
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "devices/timer.h"
+
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -77,8 +77,12 @@ static tid_t allocate_tid (void);
 static struct thread *get_high_prio_thread (void);
 bool prio_thread_list_less(const struct list_elem *a, const struct list_elem *b, void*aux UNUSED);
 bool effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-void checkThreadTime (struct thread *thread, void *aux UNUSED);
-//int max (const int a, const int b);
+static void check_thread_time (struct thread *thread, void *aux UNUSED);
+void thread_calc_recent_cpu(struct thread *thread, void *aux UNUSED);
+void thread_calc_priority(struct thread *thread);
+
+f_point load_avg = 0;
+
 int get_effective_prio(struct thread * t);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -101,12 +105,12 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -132,7 +136,25 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-  thread_foreach (checkThreadTime, NULL); //cannot call yield in interrupt context
+  if (thread_mlfqs)
+  {
+    if (t != idle_thread)
+      t->recent_cpu = add_fp_and_n (t->recent_cpu , 1);
+    if (timer_ticks () % TIMER_FREQ == 0) //if one second has passed
+    {
+      //recalc load avg
+      //recalc recent cpu for every thread
+      thread_foreach (thread_calc_recent_cpu, NULL);
+      struct real_number la1 = {59, 60};
+      struct real_number la2 = {1, 60};
+      int n = (t != idle_thread) ? 1 : 0;
+      load_avg = mult_fp(convert_rn_to_fp(la1), load_avg) + convert_rn_to_fp(la2) * (list_size (&ready_list) + n);
+      //printf("Timer = %d  ", (int)timer_ticks ());
+      //printf("Recent CPU every sec = %d\n", t->recent_cpu);
+    }
+  }
+  //int64_t min_time = list_min ()
+  thread_foreach (check_thread_time, NULL); //cannot call yield in interrupt context
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -145,7 +167,12 @@ thread_tick (void)
   
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
+  {
+    if (thread_mlfqs)
+      thread_calc_priority (t);
     intr_yield_on_return ();
+  }
+    
 }
 
 /* Prints thread statistics. */
@@ -366,14 +393,7 @@ thread_set_donated_priority (struct thread *set_t, struct thread *donate_t)
   //donate_thread_init(dt, donate_t, new_priority);
   list_push_back(&set_t->donate_thread_list, &donate_t->donate_elem);
 }
-/*int
-max (const int a, const int b)
-{
-  if (a < b)
-    return b;
-  else
-    return a;
-}*/
+
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
@@ -414,33 +434,50 @@ get_high_prio_thread (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current ()->nice = nice;
+  //recalc prio and then yield 
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return convert_fp_to_int_to_near (100 * load_avg);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  //printf("Recent CPU = %d\n", thread_current ()->recent_cpu);
+  //printf("Length of thread = %d\n", list_size (&all_list));
+  //printf("Converted Recent CPU = %d\n", convert_fp_to_int_to_near(thread_current ()->recent_cpu));
+  return convert_fp_to_int_to_near (100 * thread_current ()->recent_cpu);
 }
-
+
+
+void 
+thread_calc_recent_cpu(struct thread *thread, void *aux UNUSED)
+{
+  //printf("Calculating\n");
+  f_point coefficient = div_fp (2 * load_avg, add_fp_and_n (2 * load_avg, 1));
+  int n = add_fp_and_n (mult_fp (coefficient, thread->recent_cpu), thread->nice);
+  thread->recent_cpu = n;
+}
+
+void 
+thread_calc_priority(struct thread *thread)
+{
+  f_point fp = convert_int_to_fp(PRI_MAX) - thread->recent_cpu/4 - convert_int_to_fp (thread->nice * 2);
+  thread->priority = convert_fp_to_int_to_zero (fp);
+}
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -526,14 +563,26 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+  if (thread_mlfqs)
+    thread_calc_priority(t);
+  else
+    t->priority = priority;
   t->magic = THREAD_MAGIC;
 
   t->thread_sema = NULL;
-  t->waiting_on_thread = NULL;
-  //t->waiting_lock;
-  t->my_time = 0;
 
+  t->my_time = 0;
+  if (t == initial_thread)
+  {
+    t->recent_cpu = 0;
+    t->nice = 0;
+  }
+  else 
+  {
+    t->recent_cpu = thread_current ()->recent_cpu;
+    t->nice = thread_current ()->nice;
+  }
+    
   list_init(&t->donate_thread_list);
 
   old_level = intr_disable ();
@@ -619,7 +668,7 @@ thread_schedule_tail (struct thread *prev)
 }
 
 void 
-checkThreadTime (struct thread *thread, void *aux UNUSED)
+check_thread_time (struct thread *thread, void *aux UNUSED)
 {
   if (thread->thread_sema != NULL && thread->my_time != 0)
   {
@@ -685,38 +734,11 @@ effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, 
 {
   //retrieve thread from list elem and check prio
   struct thread *dt1 = list_entry (a, struct thread, donate_elem);
-  struct thread *dt2= list_entry (b, struct thread, donate_elem);
+  struct thread *dt2 = list_entry (b, struct thread, donate_elem);
   if (get_effective_prio (dt1) < get_effective_prio (dt2))
     return true;
   return false;
 }
-
-/* Initializes the donate lock struct and adds it to the 
-   threads list*/
-/*void 
-donate_thread_init (struct donate_thread *dt, struct thread *t, int n)
-{
-  dt->t = t;
-  dt->effective_prio = n;
-}*/
-/*
-int 
-thread_prio_compare(const void * t1, const void * t1)
-{
-  struct thread *thread_1 = (struct thread)t1;
-  struct thread *thread_2 = (struct thread)t2;
-
-  if (thread_1->priority < thread_2->priority)
-  {
-    return -1;
-  } else if (thread_1->priority > thread_2->priority)
-  {
-    return 1;
-  } else
-  {
-    return 0;
-  }
-}*/
 
 
 /* Offset of `stack' member within `struct thread'.

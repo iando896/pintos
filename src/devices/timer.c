@@ -93,6 +93,7 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks (); //start time of func call
   
   ASSERT (intr_get_level () == INTR_ON);
+  
   //while (timer_elapsed (start) < ticks) 
   //  thread_yield (); //set thread to ready
   //put thread to sleep and wake up if enough time has passed
@@ -102,6 +103,7 @@ timer_sleep (int64_t ticks)
   //
   //initialize sema to 0 and then put sema on list associated with time then down sema
   struct thread *t = thread_current ();
+  ASSERT (t->thread_sema == NULL);
   struct semaphore* s = malloc(sizeof(struct semaphore));
   t->thread_sema = s;
   sema_init (t->thread_sema, 0);
