@@ -10,6 +10,5 @@ char* readline(const char* prompt){
         l_ptr++;
     }
     *l_ptr = '\0';
-    //printf("Printing line:%s\n", line);
     return line;
 } 

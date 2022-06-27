@@ -80,9 +80,6 @@ bool effective_prio_list_less (const struct list_elem *a, const struct list_elem
 static void check_thread_time (struct thread *thread, void *aux UNUSED);
 void thread_calc_recent_cpu(struct thread *thread, void *aux UNUSED);
 void thread_calc_priority(struct thread *thread);
-
-f_point load_avg = 0;
-
 int get_effective_prio(struct thread * t);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -136,24 +133,6 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-  if (thread_mlfqs)
-  {
-    if (t != idle_thread)
-      t->recent_cpu = add_fp_and_n (t->recent_cpu , 1);
-    if (timer_ticks () % TIMER_FREQ == 0) //if one second has passed
-    {
-      //recalc load avg
-      //recalc recent cpu for every thread
-      thread_foreach (thread_calc_recent_cpu, NULL);
-      struct real_number la1 = {59, 60};
-      struct real_number la2 = {1, 60};
-      int n = (t != idle_thread) ? 1 : 0;
-      load_avg = mult_fp(convert_rn_to_fp(la1), load_avg) + convert_rn_to_fp(la2) * (list_size (&ready_list) + n);
-      //printf("Timer = %d  ", (int)timer_ticks ());
-      //printf("Recent CPU every sec = %d\n", t->recent_cpu);
-    }
-  }
-  //int64_t min_time = list_min ()
   thread_foreach (check_thread_time, NULL); //cannot call yield in interrupt context
   /* Update statistics. */
   if (t == idle_thread)
@@ -167,12 +146,7 @@ thread_tick (void)
   
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
-  {
-    if (thread_mlfqs)
-      thread_calc_priority (t);
     intr_yield_on_return ();
-  }
-    
 }
 
 /* Prints thread statistics. */
@@ -377,7 +351,6 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  //if we have donate and 
   if (!list_empty(&ready_list) && new_priority < get_high_prio_thread ()->priority)
     thread_yield ();
   //look for threads with higher priority and yield
@@ -449,7 +422,7 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  return convert_fp_to_int_to_near (100 * load_avg);
+  return 100;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -459,7 +432,7 @@ thread_get_recent_cpu (void)
   //printf("Recent CPU = %d\n", thread_current ()->recent_cpu);
   //printf("Length of thread = %d\n", list_size (&all_list));
   //printf("Converted Recent CPU = %d\n", convert_fp_to_int_to_near(thread_current ()->recent_cpu));
-  return convert_fp_to_int_to_near (100 * thread_current ()->recent_cpu);
+  return 100;
 }
 
 
@@ -467,16 +440,11 @@ void
 thread_calc_recent_cpu(struct thread *thread, void *aux UNUSED)
 {
   //printf("Calculating\n");
-  f_point coefficient = div_fp (2 * load_avg, add_fp_and_n (2 * load_avg, 1));
-  int n = add_fp_and_n (mult_fp (coefficient, thread->recent_cpu), thread->nice);
-  thread->recent_cpu = n;
 }
 
 void 
 thread_calc_priority(struct thread *thread)
 {
-  f_point fp = convert_int_to_fp(PRI_MAX) - thread->recent_cpu/4 - convert_int_to_fp (thread->nice * 2);
-  thread->priority = convert_fp_to_int_to_zero (fp);
 }
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -563,25 +531,16 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
+  sema_init (&t->thread_sema, 0);
   if (thread_mlfqs)
     thread_calc_priority(t);
   else
     t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  t->thread_sema = NULL;
-
   t->my_time = 0;
-  if (t == initial_thread)
-  {
-    t->recent_cpu = 0;
-    t->nice = 0;
-  }
-  else 
-  {
-    t->recent_cpu = thread_current ()->recent_cpu;
-    t->nice = thread_current ()->nice;
-  }
+  
+  t->nice = 0;
     
   list_init(&t->donate_thread_list);
 
@@ -670,11 +629,11 @@ thread_schedule_tail (struct thread *prev)
 void 
 check_thread_time (struct thread *thread, void *aux UNUSED)
 {
-  if (thread->thread_sema != NULL && thread->my_time != 0)
+  if (&thread->thread_sema != NULL && thread->my_time != 0)
   {
     if (timer_ticks () >= thread->my_time)
     {
-      sema_up (thread->thread_sema);
+      sema_up (&thread->thread_sema);
       thread->my_time = 0;
     }
   }

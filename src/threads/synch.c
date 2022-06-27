@@ -210,47 +210,7 @@ lock_acquire (struct lock *lock)
   //printf("Thread holding lock prio = %d\n", l_hold_thread->priority);
   //printf("Thread prio = %d\n", thread_get_priority ());
   if (l_hold_thread != NULL && l_hold_thread->priority < thread_get_priority ())
-  {
-    //printf("Acquiring already aquired lock and I have higher prio\n");
-    //thread_current ()->waiting_on_thread = l_hold_thread;
-    //printf("Thread holding lock = %s\n", l_hold_thread->name);
     thread_set_donated_priority (l_hold_thread, thread_current ());
-    //lock->waited_by = thread_current ();
-    //thread_current ()->waiting_lock = lock;
-    /*while (l_hold_thread->priority < thread_get_priority () && cnt < 8)
-    {
-      thread_set_donated_priority (l_hold_thread, curr_thread);
-      printf("Iterating; cnt = %d\n", cnt);
-      cnt++;
-      if (l_hold_thread->waiting_on_thread != NULL)
-      {
-        printf("Thread holding lock is waiting\n");
-        curr_thread = l_hold_thread;
-        l_hold_thread = l_hold_thread->waiting_on_thread;
-      }
-      else 
-        break;
-    }*/
-  }  
-  /*while (l_hold_thread != NULL && l_hold_thread->priority < thread_get_priority () && cnt < 8)
-    {
-      printf("Current thread = %s\n", thread_name ());
-      printf("L_hold_thread = %s\n", l_hold_thread->name);
-      printf("L_hold_thread prio = %d\n", l_hold_thread->priority);
-      if (cnt == 0)
-        thread_current ()->waiting_on_thread = l_hold_thread;
-      printf("Iterating; cnt = %d\n", cnt);
-      thread_set_donated_priority (l_hold_thread, curr_thread->waiting_lock, thread_get_priority ());
-      cnt++;
-      if (l_hold_thread->waiting_on_thread != NULL)
-      {
-        curr_thread = l_hold_thread;
-        l_hold_thread = l_hold_thread->waiting_lock->holder;
-        printf("L_hold_thread waiting lock not null\n");
-        //next thread is waiting on someone
-      } else 
-        l_hold_thread = NULL;
-    }*/
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }

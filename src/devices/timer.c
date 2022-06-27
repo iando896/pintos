@@ -103,14 +103,11 @@ timer_sleep (int64_t ticks)
   //
   //initialize sema to 0 and then put sema on list associated with time then down sema
   struct thread *t = thread_current ();
-  ASSERT (t->thread_sema == NULL);
-  struct semaphore* s = malloc(sizeof(struct semaphore));
-  t->thread_sema = s;
-  sema_init (t->thread_sema, 0);
+  //ASSERT (t.thread_sema != NULL);
+  //struct semaphore* s = malloc(sizeof(struct semaphore));
+  //t->thread_sema = s;
   t->my_time = start + ticks;
-  sema_down (t->thread_sema);
-  free(s);
-  t->thread_sema = NULL;
+  sema_down (&t->thread_sema);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
