@@ -91,10 +91,11 @@ struct thread
     int nice;
     struct list_elem allelem;           /* List element for all threads list. */
     struct semaphore thread_sema;      /* Semaphore that sleeps the thread */
-    int64_t my_time;
+    int64_t wake_time;
     
     struct list donate_thread_list;
     struct list_elem donate_elem;
+    struct list_elem sleep_elem;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 

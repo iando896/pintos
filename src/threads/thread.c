@@ -77,10 +77,16 @@ static tid_t allocate_tid (void);
 static struct thread *get_high_prio_thread (void);
 bool prio_thread_list_less(const struct list_elem *a, const struct list_elem *b, void*aux UNUSED);
 bool effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-static void check_thread_time (struct thread *thread, void *aux UNUSED);
+bool sleep_time_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+//static void check_thread_time (struct thread *thread, void *aux UNUSED);
 void thread_calc_recent_cpu(struct thread *thread, void *aux UNUSED);
 void thread_calc_priority(struct thread *thread);
 int get_effective_prio(struct thread * t);
+
+static void check_thread_time (void);
+void sleep_thread (struct thread *t);
+struct list sleep_list;
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -133,7 +139,8 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-  thread_foreach (check_thread_time, NULL); //cannot call yield in interrupt context
+  //thread_foreach (check_thread_time, NULL); //cannot call yield in interrupt context
+  check_thread_time();
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -538,7 +545,7 @@ init_thread (struct thread *t, const char *name, int priority)
     t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  t->my_time = 0;
+  t->wake_time = 0;
   
   t->nice = 0;
     
@@ -635,7 +642,7 @@ check_thread_time ()
     struct thread *t = list_entry (e, struct thread, sleep_elem);
     while (timer_ticks () >= t->wake_time)
     {
-      sema_up (t->thread_sema);
+      sema_up (&t->thread_sema);
       list_remove(e);
       if (!list_empty (&sleep_list))
       {
@@ -647,6 +654,13 @@ check_thread_time ()
     }
   }  
 }
+
+void 
+sleep_thread (struct thread *t)
+{
+  list_insert_ordered (&sleep_list, &t->sleep_elem, sleep_time_list_less, NULL);
+}
+
 
 /* Schedules a new process.  At entry, interrupts must be off and
    the running process's state must have been changed from
@@ -708,6 +722,15 @@ effective_prio_list_less (const struct list_elem *a, const struct list_elem *b, 
   return false;
 }
 
+bool 
+sleep_time_list_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct thread *t1 = list_entry (a, struct thread, sleep_elem);
+  struct thread *t2 = list_entry (b, struct thread, sleep_elem);
+  if (t1->wake_time < t2->wake_time)
+    return true;
+  return false;
+}
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
