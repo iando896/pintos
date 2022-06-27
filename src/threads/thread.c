@@ -539,14 +539,13 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  sema_init (&t->thread_sema, 0);
+  
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-
   t->wake_time = 0;
-  
   t->nice = 0;
-    
+  sema_init (&t->thread_sema, 0);
+  
   list_init(&t->donate_thread_list);
 
   old_level = intr_disable ();

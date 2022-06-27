@@ -103,7 +103,6 @@ timer_sleep (int64_t ticks)
   //
   //initialize sema to 0 and then put sema on list associated with time then down sema
   struct thread *t = thread_current ();
-  //ASSERT (t.thread_sema != NULL);
   sleep_thread (t);
   t->wake_time = start + ticks;
   sema_down (&t->thread_sema);
