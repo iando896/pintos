@@ -539,10 +539,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   sema_init (&t->thread_sema, 0);
-  if (thread_mlfqs)
-    thread_calc_priority(t);
-  else
-    t->priority = priority;
+  t->priority = priority;
   t->magic = THREAD_MAGIC;
 
   t->wake_time = 0;
