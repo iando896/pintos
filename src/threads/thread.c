@@ -627,16 +627,25 @@ thread_schedule_tail (struct thread *prev)
 }
 
 void 
-check_thread_time (struct thread *thread, void *aux UNUSED)
+check_thread_time ()
 {
-  if (&thread->thread_sema != NULL && thread->my_time != 0)
+  if (!list_empty (&sleep_list))
   {
-    if (timer_ticks () >= thread->my_time)
+    struct list_elem *e = list_front (&sleep_list); 
+    struct thread *t = list_entry (e, struct thread, sleep_elem);
+    while (timer_ticks () >= t->wake_time)
     {
-      sema_up (&thread->thread_sema);
-      thread->my_time = 0;
+      sema_up (t->thread_sema);
+      list_remove(e);
+      if (!list_empty (&sleep_list))
+      {
+        e = list_front (&sleep_list); 
+        t = list_entry (e, struct thread, sleep_elem);
+      }
+      else
+        break;
     }
-  }
+  }  
 }
 
 /* Schedules a new process.  At entry, interrupts must be off and
