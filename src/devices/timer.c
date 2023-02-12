@@ -91,21 +91,25 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks (); //start time of func call
-  
+  struct thread *t = thread_current ();
   ASSERT (intr_get_level () == INTR_ON);
   
   //while (timer_elapsed (start) < ticks) 
   //  thread_yield (); //set thread to ready
-  //put thread to sleep and wake up if enough time has passed
-  //who knows the time?
   //create a list of locks and their time
-  //use interrupt and ask if any time has passed
-  //
-  //initialize sema to 0 and then put sema on list associated with time then down sema
-  struct thread *t = thread_current ();
-  sleep_thread (t);
   t->wake_time = start + ticks;
+  sleep_thread (t);
   sema_down (&t->thread_sema);
+
+  /*ASSERT (t->thread_sema == NULL);
+  struct semaphore* s = malloc(sizeof(struct semaphore));
+  t->thread_sema = s;
+  sema_init (t->thread_sema, 0);
+  t->wake_time = start + ticks;
+  sleep_thread (t);
+  sema_down (t->thread_sema);
+  free(s);
+  t->thread_sema = NULL;*/
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be

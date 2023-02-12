@@ -1,3 +1,5 @@
+#include "readline.h"
+
 char* readline(const char* prompt){
     printf(prompt);
     char key;
