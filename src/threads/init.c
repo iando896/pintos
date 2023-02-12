@@ -22,6 +22,7 @@
 #include "threads/palloc.h"
 #include "threads/pte.h"
 #include "threads/thread.h"
+#include "threads/readline.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #include "userprog/exception.h"
@@ -133,7 +134,23 @@ pintos_init (void)
     /* Run actions specified on kernel command line. */
     run_actions (argv);
   } else {
-    // TODO: no command line passed to kernel. Run interactively 
+    // TODO: no command line passed to kernel. Run interactively
+    char* line;
+    console_init();
+    char* prompt = "ICS143A>";
+    while ((line = readline(prompt)) != NULL) {
+      printf("\n");
+      if(strcmp(line, "whoami") == 0)
+      {
+        printf("Ian\n");
+      } else if (strcmp(line, "exit") == 0){
+        break;
+      }
+      else {
+        printf("invalid command\n");
+      }
+      free(line);
+    }
   }
 
   /* Finish up. */

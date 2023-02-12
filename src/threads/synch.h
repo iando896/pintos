@@ -3,7 +3,7 @@
 
 #include <list.h>
 #include <stdbool.h>
-
+#include "threads/malloc.h"
 /* A counting semaphore. */
 struct semaphore 
   {
@@ -40,6 +40,7 @@ void cond_init (struct condition *);
 void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
+
 
 /* Optimization barrier.
 
